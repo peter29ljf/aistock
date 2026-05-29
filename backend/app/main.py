@@ -11,6 +11,7 @@ from .config import ensure_dirs
 from .routers import agent as agent_router
 from .routers import alerts as alerts_router
 from .routers import chat as chat_router
+from .routers import health as health_router
 from .routers import internal as internal_router
 from .routers import portfolio as portfolio_router
 from .routers import schedules as schedules_router
@@ -43,6 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(agent_router.router)
+app.include_router(health_router.router)
 app.include_router(strategies_router.router)
 app.include_router(chat_router.router)
 app.include_router(portfolio_router.router)

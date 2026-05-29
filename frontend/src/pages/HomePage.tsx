@@ -4,6 +4,65 @@ import { api } from "../api";
 import ChatPanel from "../components/ChatPanel";
 import type { Strategy } from "../types";
 
+// ─── MCP status bar ──────────────────────────────────────────────────────────
+
+const MCP_NAMES: Record<string, string> = {
+  "tiger-openapi": "Tiger",
+  "yfinance-tools": "yfinance",
+  "portfolio": "portfolio",
+  "strategy-doc": "strategy-doc",
+  "price-alert": "price-alert",
+  "scheduler": "scheduler",
+};
+
+function McpStatus() {
+  const [data, setData] = useState<Record<string, { status: string; detail?: string; jobs?: number }> | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try { setData(await api.getMcpHealth()); }
+    catch { setData(null); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const entries = data ? Object.entries(data) : [];
+  const hasError = entries.some(([, v]) => v.status === "error");
+
+  return (
+    <div className="mcp-bar">
+      <span className="mcp-bar-label">MCP</span>
+      {loading && !data && (
+        <span className="mcp-chip loading"><span className="mcp-dot" />检查中…</span>
+      )}
+      {entries.map(([key, val]) => {
+        const label = MCP_NAMES[key] ?? key;
+        const detail = val.detail || (val.jobs != null ? `${val.jobs} tasks` : "");
+        return (
+          <span key={key} className={`mcp-chip ${val.status}`} title={detail || undefined}>
+            <span className="mcp-dot" />
+            {label}
+            {val.status === "error" && detail && (
+              <span className="mcp-chip-detail">— {detail}</span>
+            )}
+            {key === "scheduler" && val.jobs != null && (
+              <span className="mcp-chip-detail">({val.jobs})</span>
+            )}
+          </span>
+        );
+      })}
+      {!loading && (
+        <button className="mcp-refresh" onClick={load} title="刷新状态">↺</button>
+      )}
+      {!loading && hasError && (
+        <span style={{ fontSize: 11, color: "#ff8a8a", marginLeft: 4 }}>部分 MCP 异常</span>
+      )}
+    </div>
+  );
+}
+
 type HomeTab = "strategies" | "agent";
 
 function relativeTime(iso?: string): string {
@@ -294,6 +353,8 @@ export default function HomePage() {
           onClick={() => setTab("agent")}
         >🤖 助手</button>
       </div>
+
+      <McpStatus />
 
       <div className="home-tab-content">
         <div className={`home-pane${tab === "strategies" ? " visible" : ""}`}>

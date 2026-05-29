@@ -15,6 +15,8 @@ SCHEDULES_DB_PATH = DATA_DIR / "schedules.sqlite"
 
 CLAUDE_BIN = os.environ.get("AISTOCK_CLAUDE_BIN", "/Users/junfenglin/.local/bin/claude")
 VENV_PYTHON = os.environ.get("AISTOCK_VENV_PYTHON", str(ROOT / "backend" / ".venv" / "bin" / "python"))
+# Python used by the tiger-openapi MCP server (must have tigeropen installed)
+TIGER_PYTHON = os.environ.get("AISTOCK_TIGER_PYTHON", "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3")
 
 IB_HOST = os.environ.get("AISTOCK_IB_HOST", "127.0.0.1")
 IB_PORT = int(os.environ.get("AISTOCK_IB_PORT", "4001"))

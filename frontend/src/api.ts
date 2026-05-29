@@ -27,6 +27,8 @@ export const api = {
   deleteAgentSession: (sid: string) =>
     fetch(`/api/agent/${sid}`, { method: "DELETE" }).then(j<{ ok: boolean }>),
 
+  getMcpHealth: () => fetch("/api/health/mcp").then(j<Record<string, { status: string; detail?: string; jobs?: number }>>),
+
   listAlerts: (sid: string) => fetch(`/api/strategies/${sid}/alerts`).then(j<Alert[]>),
   listSchedules: (sid: string) => fetch(`/api/strategies/${sid}/schedules`).then(j<Schedule[]>),
 

@@ -38,12 +38,13 @@ _TIGER_PROPS  = Path("/Users/junfenglin/workspace/tigerskill/tiger_openapi_confi
 # Tiger: live connectivity check (calls get_market_status)
 _TIGER_LIVE_PROBE = """
 from tigeropen.tiger_open_config import TigerOpenClientConfig
-from tigeropen.quote.quote_client import QuoteClient
+from tigeropen.trade.trade_client import TradeClient
 from tigeropen.common.consts import Language
 cfg = TigerOpenClientConfig(props_path={props!r})
 cfg.language = Language.en_US
-client = QuoteClient(cfg)
-status = client.get_market_status(["US"])
+client = TradeClient(cfg)
+# get_managed_accounts is a lightweight call that verifies auth + connectivity
+accounts = client.get_managed_accounts()
 print("ok")
 """
 
@@ -102,7 +103,7 @@ async def _check_tiger_live() -> dict:
     if not _TIGER_PROPS.exists():
         return _store("tiger_live", {"status": "error", "detail": ".properties 未找到", "mode": "live"})
     script = _TIGER_LIVE_PROBE.format(props=str(_TIGER_PROPS))
-    ok, detail = await _run_probe(script, timeout=12.0)
+    ok, detail = await _run_probe(script, timeout=15.0)
     if ok:
         return _store("tiger_live", {"status": "ok", "detail": "API 可达", "mode": "live"})
     return _store("tiger_live", {"status": "error", "detail": detail, "mode": "live"})

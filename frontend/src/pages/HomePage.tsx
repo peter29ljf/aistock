@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import ChatPanel from "../components/ChatPanel";
@@ -18,6 +18,111 @@ function relativeTime(iso?: string): string {
   return d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
+// ─── Cleanup modal ────────────────────────────────────────────────────────────
+
+interface CleanupTarget { sid: string; name: string; }
+
+interface CleanupLine { text: string; kind: "text" | "phase" | "tool" | "error"; }
+
+function CleanupModal({ target, onDone }: { target: CleanupTarget; onDone: () => void }) {
+  const { sid, name } = target;
+  const [lines, setLines] = useState<CleanupLine[]>([]);
+  const [liveText, setLiveText] = useState("");
+  const [done, setDone] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textBuf = useRef("");
+
+  const push = (text: string, kind: CleanupLine["kind"]) =>
+    setLines(prev => [...prev, { text, kind }]);
+
+  useEffect(() => {
+    // Start cleanup (fire-and-forget)
+    fetch(`/api/strategies/${sid}/cleanup_and_delete`, { method: "POST" }).catch(() => {});
+
+    // Stream progress
+    const es = new EventSource(`/api/strategies/${sid}/cleanup_stream`);
+
+    es.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+
+        if (ev.type === "cleanup_phase") {
+          if (textBuf.current) {
+            push(textBuf.current, "text");
+            textBuf.current = "";
+            setLiveText("");
+          }
+          push(ev.message ?? ev.phase ?? "", "phase");
+
+        } else if (ev.type === "content_block_start" && ev.content_block?.type === "tool_use") {
+          if (textBuf.current) {
+            push(textBuf.current, "text");
+            textBuf.current = "";
+            setLiveText("");
+          }
+          push(`⚙ ${ev.content_block.name}`, "tool");
+
+        } else if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+          textBuf.current += ev.delta.text;
+          setLiveText(textBuf.current);
+
+        } else if (ev.type === "content_block_stop") {
+          if (textBuf.current) {
+            push(textBuf.current, "text");
+            textBuf.current = "";
+            setLiveText("");
+          }
+
+        } else if (ev.type === "error") {
+          push(ev.message ?? "未知错误", "error");
+
+        } else if (ev.type === "deleted") {
+          push("✓ 策略已删除", "phase");
+          setDone(true);
+          es.close();
+        }
+      } catch {}
+    };
+
+    es.onerror = () => {
+      if (!done) push("连接中断", "error");
+      es.close();
+    };
+
+    return () => es.close();
+  }, [sid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lines, liveText]);
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-box">
+        <div className="modal-header">
+          <span className="modal-title">清理策略 · {name}</span>
+          {done
+            ? <span style={{ color: "#8acc8a", fontSize: 13 }}>✓ 完成</span>
+            : <span><span className="cleanup-spinner" />运行中…</span>}
+        </div>
+        <div className="modal-body" ref={scrollRef}>
+          {lines.length === 0 && !liveText && (
+            <div className="cleanup-msg phase">正在启动…</div>
+          )}
+          {lines.map((l, i) => (
+            <div key={i} className={`cleanup-msg ${l.kind}`}>{l.text}</div>
+          ))}
+          {liveText && <div className="cleanup-msg">{liveText}</div>}
+        </div>
+        <div className="modal-footer">
+          <button className="primary" disabled={!done} onClick={onDone}>关闭</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Strategies pane ─────────────────────────────────────────────────────────
 
 function StrategiesPane() {
@@ -26,6 +131,7 @@ function StrategiesPane() {
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [cleanup, setCleanup] = useState<CleanupTarget | null>(null);
 
   const refresh = async () => {
     try { setItems(await api.listStrategies()); }
@@ -41,14 +147,18 @@ function StrategiesPane() {
     finally { setBusy(false); }
   };
 
-  const onDelete = async (sid: string) => {
-    if (!confirm(`删除策略 ${sid}? 文件夹与日志会被一并清除。`)) return;
-    try { await api.deleteStrategy(sid); await refresh(); }
-    catch (e: any) { setErr(String(e.message ?? e)); }
+  const onDelete = (s: Strategy) => {
+    setCleanup({ sid: s.sid, name: s.name ?? s.sid });
+  };
+
+  const onCleanupDone = async () => {
+    setCleanup(null);
+    await refresh();
   };
 
   return (
     <div className="strategies-pane">
+      {cleanup && <CleanupModal target={cleanup} onDone={onCleanupDone} />}
       <div className="new-form">
         <input placeholder="策略名称" value={name} onChange={e => setName(e.target.value)} />
         <input placeholder="一句话描述（可选）" value={description} onChange={e => setDescription(e.target.value)} style={{ flex: 1 }} />
@@ -65,7 +175,7 @@ function StrategiesPane() {
             </div>
             <div className="row-actions">
               <Link to={`/s/${s.sid}`}><button>打开</button></Link>
-              <button className="danger" onClick={() => onDelete(s.sid)}>删除</button>
+              <button className="danger" onClick={() => onDelete(s)}>删除</button>
             </div>
           </div>
         ))}
@@ -86,7 +196,6 @@ function AgentPane() {
   const loadSessions = async () => {
     try {
       const list = await api.listAgentSessions();
-      // newest first
       setSessions([...list].reverse());
     } catch (e: any) { setErr(String(e.message ?? e)); }
   };

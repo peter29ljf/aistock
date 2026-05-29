@@ -124,3 +124,23 @@ async def remove_job(task_id: str) -> bool:
         return True
     except Exception:
         return False
+
+
+async def remove_jobs_for_sid(sid: str) -> int:
+    """Remove all scheduler jobs for a strategy. Returns number removed."""
+    if _scheduler is None:
+        return 0
+    import json as _json
+    removed = 0
+    for j in list(_scheduler.get_jobs()):
+        try:
+            meta = _json.loads(j.name) if j.name and j.name.startswith("{") else {"sid": None}
+        except Exception:
+            meta = {"sid": None}
+        if meta.get("sid") == sid:
+            try:
+                j.remove()
+                removed += 1
+            except Exception:
+                pass
+    return removed

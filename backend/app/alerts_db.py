@@ -65,6 +65,16 @@ async def list_for_strategy(sid: str) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
 
 
+async def cancel_all_for_strategy(sid: str) -> int:
+    """Cancel all active alerts for a strategy. Returns number cancelled."""
+    async with aiosqlite.connect(ALERTS_DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE alerts SET status='cancelled' WHERE sid=? AND status='active'", (sid,)
+        )
+        await db.commit()
+        return cur.rowcount or 0
+
+
 async def cancel(alert_id: int) -> bool:
     async with aiosqlite.connect(ALERTS_DB_PATH) as db:
         cur = await db.execute(

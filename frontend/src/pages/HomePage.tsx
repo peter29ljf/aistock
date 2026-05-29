@@ -31,6 +31,7 @@ function CleanupModal({ target, onDone }: { target: CleanupTarget; onDone: () =>
   const [done, setDone] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textBuf = useRef("");
+  const deletedRef = useRef(false); // sync flag to suppress onerror after successful delete
 
   const push = (text: string, kind: CleanupLine["kind"]) =>
     setLines(prev => [...prev, { text, kind }]);
@@ -77,6 +78,7 @@ function CleanupModal({ target, onDone }: { target: CleanupTarget; onDone: () =>
           push(ev.message ?? "未知错误", "error");
 
         } else if (ev.type === "deleted") {
+          deletedRef.current = true;
           push("✓ 策略已删除", "phase");
           setDone(true);
           es.close();
@@ -85,7 +87,8 @@ function CleanupModal({ target, onDone }: { target: CleanupTarget; onDone: () =>
     };
 
     es.onerror = () => {
-      if (!done) push("连接中断", "error");
+      // Server closing the stream after "deleted" also fires onerror — suppress it.
+      if (!deletedRef.current) push("连接中断", "error");
       es.close();
     };
 

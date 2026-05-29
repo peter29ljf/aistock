@@ -7,6 +7,8 @@ interface Props {
   title?: string;
   onRefreshPortfolio?: () => void;
   onRefreshDoc?: () => void;
+  onRefreshAlerts?: () => void;
+  onRefreshSchedules?: () => void;
 }
 
 interface Msg {
@@ -126,7 +128,7 @@ function ToolMsg({ m }: { m: Msg }) {
   );
 }
 
-export default function ChatPanel({ sid, title, onRefreshPortfolio, onRefreshDoc }: Props) {
+export default function ChatPanel({ sid, title, onRefreshPortfolio, onRefreshDoc, onRefreshAlerts, onRefreshSchedules }: Props) {
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -146,6 +148,8 @@ export default function ChatPanel({ sid, title, onRefreshPortfolio, onRefreshDoc
         if (ev.type === "done") setStreaming(false);
         if (ev.type === "portfolio_changed") onRefreshPortfolio?.();
         if (ev.type === "strategy_doc_changed") onRefreshDoc?.();
+        if (ev.type === "alert_changed") onRefreshAlerts?.();
+        if (ev.type === "schedule_changed") onRefreshSchedules?.();
       } catch {}
     };
     es.onerror = () => {};

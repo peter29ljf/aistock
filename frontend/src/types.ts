@@ -25,3 +25,26 @@ export interface ChatEvent {
   message?: unknown;
   [k: string]: unknown;
 }
+
+export interface Alert {
+  id: number;
+  sid: string;
+  symbol: string;
+  target: number;
+  direction: "above" | "below";
+  status: "active" | "fired" | "cancelled";
+  note?: string;
+  created_at?: string;
+  fired_at?: string;
+  fired_price?: number;
+}
+
+export interface Schedule {
+  task_id: string;
+  sid?: string;
+  note?: string;
+  kind?: string;
+  expr?: string;
+  run_at?: string;
+  next_run_time?: string;
+}

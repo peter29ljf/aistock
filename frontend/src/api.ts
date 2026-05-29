@@ -1,4 +1,4 @@
-import type { ChatEvent, Strategy } from "./types";
+import type { Alert, ChatEvent, Schedule, Strategy } from "./types";
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -26,6 +26,9 @@ export const api = {
     }).then(j<Strategy>),
   deleteAgentSession: (sid: string) =>
     fetch(`/api/agent/${sid}`, { method: "DELETE" }).then(j<{ ok: boolean }>),
+
+  listAlerts: (sid: string) => fetch(`/api/strategies/${sid}/alerts`).then(j<Alert[]>),
+  listSchedules: (sid: string) => fetch(`/api/strategies/${sid}/schedules`).then(j<Schedule[]>),
 
   sendMessage: (sid: string, message: string) =>
     fetch(`/api/strategies/${sid}/chat`, {

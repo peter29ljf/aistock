@@ -49,6 +49,7 @@ async def run_claude_cleanup(sid: str) -> None:
             *args, cwd=str(cwd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=8 * 1024 * 1024,  # 8 MB — default 64 KB causes ValueError on long lines
         )
     except FileNotFoundError:
         err = f"claude binary not found at {CLAUDE_BIN}"
@@ -95,6 +96,7 @@ async def run_claude(sid: str, trigger: str, extras: dict[str, Any] | None = Non
                 cwd=str(cwd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=8 * 1024 * 1024,  # 8 MB — default 64 KB causes ValueError on long lines
             )
         except FileNotFoundError:
             err = f"claude binary not found at {CLAUDE_BIN}"

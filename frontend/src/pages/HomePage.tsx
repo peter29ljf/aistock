@@ -16,20 +16,32 @@ const MCP_NAMES: Record<string, string> = {
 };
 
 function McpStatus() {
-  const [data, setData] = useState<Record<string, { status: string; detail?: string; jobs?: number }> | null>(null);
+  const [data, setData] = useState<Record<string, { status: string; detail?: string; jobs?: number; mode?: string }> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tigerLive, setTigerLive] = useState<{ status: string; detail?: string } | null>(null);
+  const [tigerChecking, setTigerChecking] = useState(false);
 
   const load = async () => {
     setLoading(true);
+    setTigerLive(null);
     try { setData(await api.getMcpHealth()); }
     catch { setData(null); }
     finally { setLoading(false); }
   };
 
+  const checkTigerLive = async () => {
+    setTigerChecking(true);
+    setTigerLive(null);
+    try { setTigerLive(await api.getTigerLive()); }
+    catch { setTigerLive({ status: "error", detail: "请求失败" }); }
+    finally { setTigerChecking(false); }
+  };
+
   useEffect(() => { load(); }, []);
 
   const entries = data ? Object.entries(data) : [];
-  const hasError = entries.some(([, v]) => v.status === "error");
+  const hasError = entries.some(([, v]) => v.status === "error") ||
+    (tigerLive?.status === "error");
 
   return (
     <div className="mcp-bar">
@@ -39,12 +51,24 @@ function McpStatus() {
       )}
       {entries.map(([key, val]) => {
         const label = MCP_NAMES[key] ?? key;
-        const detail = val.detail || (val.jobs != null ? `${val.jobs} tasks` : "");
+        // For tiger, prefer the live check result if available
+        const effective = key === "tiger-openapi" && tigerLive ? tigerLive : val;
+        const detail = effective.detail || (val.jobs != null ? `${val.jobs} tasks` : "");
+        const title = detail || undefined;
         return (
-          <span key={key} className={`mcp-chip ${val.status}`} title={detail || undefined}>
+          <span key={key} className={`mcp-chip ${effective.status}`} title={title}>
             <span className="mcp-dot" />
             {label}
-            {val.status === "error" && detail && (
+            {key === "tiger-openapi" && (
+              <span className="mcp-chip-detail" style={{ marginLeft: 4 }}>
+                {tigerChecking
+                  ? "测试中…"
+                  : tigerLive
+                    ? (tigerLive.status === "ok" ? "API ✓" : `✗ ${tigerLive.detail}`)
+                    : (val.mode === "config" ? "·凭证" : "")}
+              </span>
+            )}
+            {key !== "tiger-openapi" && effective.status === "error" && detail && (
               <span className="mcp-chip-detail">— {detail}</span>
             )}
             {key === "scheduler" && val.jobs != null && (
@@ -53,11 +77,22 @@ function McpStatus() {
           </span>
         );
       })}
+      {!loading && data?.["tiger-openapi"] && !tigerChecking && (
+        <button
+          className="mcp-refresh"
+          onClick={checkTigerLive}
+          title="测试 Tiger API 实际连接（约 5-12s）"
+          style={{ fontSize: 11 }}
+        >
+          Tiger 实连测试
+        </button>
+      )}
+      {tigerChecking && <span style={{ fontSize: 11, color: "#8a96a8" }}>连接 Tiger…</span>}
       {!loading && (
         <button className="mcp-refresh" onClick={load} title="刷新状态">↺</button>
       )}
       {!loading && hasError && (
-        <span style={{ fontSize: 11, color: "#ff8a8a", marginLeft: 4 }}>部分 MCP 异常</span>
+        <span style={{ fontSize: 11, color: "#ff8a8a", marginLeft: 2 }}>部分 MCP 异常</span>
       )}
     </div>
   );

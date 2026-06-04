@@ -167,7 +167,7 @@ def _best_price(sym: str) -> float | None:
     from .bitget_quote import get as bitget_get, us_session
     p = bitget_get(sym)
     if p:
-        log.debug("bitget %s = %.4f", sym, p)
+        log.info("bitget poll %s = %.4f", sym, p)
         return p
 
     # yfinance 回退：根据当前真实时段选正确字段

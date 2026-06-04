@@ -10,6 +10,8 @@ venv/
 node_modules/
 dist/
 .parcel-cache/
+# TypeScript compiled output (*.js next to *.tsx source files)
+frontend/src/**/*.js
 
 # Runtime data & secrets
 data/internal_token
@@ -24,7 +26,9 @@ nohup.out
 strategies/*/.mcp.json
 strategies/*/logs/
 strategies/*/portfolio.json
+strategies/*/CLAUDE.md
 strategies/agent-*/
+strategies/_agent/
 
 # Env & credentials
 .env

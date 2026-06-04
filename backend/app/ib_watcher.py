@@ -189,7 +189,7 @@ def _best_price(sym: str) -> float | None:
             v = _f(post) or _f(regular) or _f(pre)
 
         if v:
-            log.debug("yfinance fallback %s = %.4f (session=%s)", sym, v, session)
+            log.info("yfinance poll %s = %.4f (session=%s)", sym, v, session)
         return v
     except Exception as e:
         log.warning("_best_price yfinance %s failed: %s", sym, e)

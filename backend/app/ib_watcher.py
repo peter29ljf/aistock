@@ -162,41 +162,64 @@ async def _fire_alert(row: dict[str, Any]) -> None:
     await reconcile()
 
 
-def _yf_best_price(sym: str) -> float | None:
-    """获取最优价格：盘前/盘后 > 正规市场价，确保告警在延伸交易时段也能触发。"""
+def _best_price(sym: str) -> float | None:
+    """Bitget 永续合约实时价（首选）；不在 Bitget 上则 session-aware yfinance 回退。"""
+    from .bitget_quote import get as bitget_get, us_session
+    p = bitget_get(sym)
+    if p:
+        log.debug("bitget %s = %.4f", sym, p)
+        return p
+
+    # yfinance 回退：根据当前真实时段选正确字段
     import yfinance as yf
-    t = yf.Ticker(sym)
-    info = t.info
-    # 优先级：preMarketPrice > postMarketPrice > regularMarketPrice > lastPrice
-    for key in ("preMarketPrice", "postMarketPrice", "regularMarketPrice"):
-        v = info.get(key)
-        if v and float(v) > 0:
-            state = info.get("marketState", "")
-            log.debug("yf %s price=%.4f (%s, marketState=%s)", sym, float(v), key, state)
-            return float(v)
-    fast = t.fast_info
-    v = fast.get("lastPrice") or fast.get("last_price")
-    return float(v) if v else None
+    from datetime import datetime, time as dtime
+    from zoneinfo import ZoneInfo
+    try:
+        info = yf.Ticker(sym).info
+        session = us_session()
+        pre     = info.get("preMarketPrice")
+        post    = info.get("postMarketPrice")
+        regular = info.get("regularMarketPrice")
+        def _f(v): return float(v) if v and float(v) > 0 else None
+
+        if session == "pre"     and _f(pre):     v = _f(pre)
+        elif session == "regular" and _f(regular): v = _f(regular)
+        elif session == "post"   and _f(post):   v = _f(post)
+        else:  # closed — prefer post(last extended) > regular(last close)
+            v = _f(post) or _f(regular) or _f(pre)
+
+        if v:
+            log.debug("yfinance fallback %s = %.4f (session=%s)", sym, v, session)
+        return v
+    except Exception as e:
+        log.warning("_best_price yfinance %s failed: %s", sym, e)
+        return None
 
 
 async def _fallback_poll_loop() -> None:
-    """当 IB 离线时，每 30s 用 yfinance 轮询；盘前/盘后价格也能触发告警。"""
-    log.info("starting yfinance fallback poll loop (30s)")
+    """IB 离线时轮询价格触发告警。
+    Bitget 有合约的标的：每 8s 轮询（bulk cache，实时）。
+    Bitget 无合约的标的：yfinance session-aware，每 30s（避免频繁请求）。
+    """
+    log.info("starting price poll loop (Bitget primary, yfinance fallback)")
+    yf_counter = 0
     while _loop_running:
         try:
             rows = await alerts_db.list_active()
             symbols = sorted({r["symbol"].upper() for r in rows})
+            if not symbols:
+                await asyncio.sleep(8)
+                continue
+
             loop = asyncio.get_running_loop()
             for sym in symbols:
                 try:
-                    # yfinance 是同步 IO，放到线程池避免阻塞事件循环
-                    price = await loop.run_in_executor(None, _yf_best_price, sym)
+                    price = await loop.run_in_executor(None, _best_price, sym)
                     if price:
-                        log.info("yfinance poll %s = %.4f", sym, price)
                         _last_price[sym] = price
                         await _check_alerts(sym, price)
                 except Exception:
                     continue
         except Exception:
             pass
-        await asyncio.sleep(30)
+        await asyncio.sleep(8)

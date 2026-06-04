@@ -14,6 +14,8 @@ import time
 import urllib.request
 import urllib.parse
 import json as _json
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
 from mcp.server.fastmcp import FastMCP
@@ -24,6 +26,72 @@ from app.market_data import MarketDataService
 mcp = FastMCP("yfinance-tools")
 
 _svc = MarketDataService(aistock_root() / "data" / "kline_cache")
+
+# ── US market session (DST-aware via zoneinfo) ────────────────────────────────
+
+_ET = ZoneInfo("America/New_York")   # auto-handles EST (UTC-5) / EDT (UTC-4)
+
+_SESSION_WINDOWS = [
+    # (start_inclusive, end_exclusive, session_name)
+    (dtime(4,  0),  dtime(9, 30),  "pre"),       # 4:00–9:29 ET
+    (dtime(9, 30),  dtime(16, 0),  "regular"),   # 9:30–15:59 ET
+    (dtime(16, 0),  dtime(20, 0),  "post"),      # 16:00–19:59 ET
+    # outside these = "closed"
+]
+
+
+def us_market_session() -> dict:
+    """Return current US market session and ET clock, DST-aware.
+
+    Returns:
+        session   : 'pre' | 'regular' | 'post' | 'closed'
+        et_now    : ISO string of current Eastern Time (with UTC offset)
+        is_dst    : True if US is currently on EDT (daylight saving)
+        utc_offset: e.g. '-04:00' (EDT) or '-05:00' (EST)
+        is_weekday: False on Saturday/Sunday (market always closed)
+    """
+    now_et = datetime.now(_ET)
+    weekday = now_et.weekday()          # Mon=0 … Sun=6
+    is_weekday = weekday < 5
+    t = now_et.time().replace(tzinfo=None)
+
+    session = "closed"
+    if is_weekday:
+        for start, end, name in _SESSION_WINDOWS:
+            if start <= t < end:
+                session = name
+                break
+
+    offset_sec = now_et.utcoffset().total_seconds()
+    hrs = int(offset_sec // 3600)
+    mins = int((abs(offset_sec) % 3600) // 60)
+    utc_offset = f"{hrs:+03d}:{mins:02d}"
+    is_dst = (offset_sec == -4 * 3600)      # EDT = UTC-4
+
+    return {
+        "session":    session,
+        "et_now":     now_et.strftime("%Y-%m-%d %H:%M:%S") + " ET",
+        "is_dst":     is_dst,
+        "tz_label":   "EDT (UTC-4)" if is_dst else "EST (UTC-5)",
+        "utc_offset": utc_offset,
+        "is_weekday": is_weekday,
+        "weekday":    ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][weekday],
+    }
+
+
+@mcp.tool()
+def get_market_session() -> dict:
+    """Return the current US stock market session and Eastern Time clock.
+
+    Sessions:
+      pre     — pre-market  04:00–09:29 ET  (extended hours, lower liquidity)
+      regular — main session 09:30–15:59 ET
+      post    — after-hours 16:00–19:59 ET
+      closed  — outside all extended hours, or weekend
+
+    DST is handled automatically (EDT Apr–Nov, EST Nov–Mar).
+    """
+    return us_market_session()
 
 # ── Bitget perpetual contract real-time price ──────────────────────────────────
 
@@ -157,35 +225,53 @@ def get_stock_quote(symbols: list[str]) -> dict:
         # ── Fallback: yfinance (15-min delay) ─────────────────────────────────
         try:
             info = yf.Ticker(sym).info
-            market_state = info.get("marketState", "UNKNOWN")
-            pre = info.get("preMarketPrice")
-            post = info.get("postMarketPrice")
+            sess = us_market_session()
+            session = sess["session"]
+
+            pre     = info.get("preMarketPrice")
+            post    = info.get("postMarketPrice")
             regular = info.get("regularMarketPrice")
 
-            if market_state in ("PRE", "PREPRE") and pre and float(pre) > 0:
-                price, src = float(pre), "yfinance_pre"
-            elif market_state in ("POST", "POSTPOST") and post and float(post) > 0:
-                price, src = float(post), "yfinance_post"
-            elif regular and float(regular) > 0:
-                price, src = float(regular), "yfinance_regular"
+            def _f(v): return float(v) if v and float(v) > 0 else None
+
+            # Pick price based on current real-world session (not stale yf marketState)
+            if session == "pre" and _f(pre):
+                price, src = _f(pre), "yfinance_pre"
+            elif session == "regular" and _f(regular):
+                price, src = _f(regular), "yfinance_regular"
+            elif session == "post" and _f(post):
+                price, src = _f(post), "yfinance_post"
+            elif session == "closed":
+                # Closed: prefer post (last extended price) → regular (last close) → pre
+                if _f(post):
+                    price, src = _f(post), "yfinance_post_last"
+                elif _f(regular):
+                    price, src = _f(regular), "yfinance_regular_last"
+                elif _f(pre):
+                    price, src = _f(pre), "yfinance_pre_last"
+                else:
+                    price, src = None, "yfinance_no_price"
             else:
+                # Unexpected session — best-effort
                 price, src = None, None
-                for v, s in ((pre, "yfinance_pre"), (post, "yfinance_post"), (regular, "yfinance_regular")):
-                    if v and float(v) > 0:
-                        price, src = float(v), s
+                for v, s in ((_f(regular), "yfinance_regular"), (_f(post), "yfinance_post"), (_f(pre), "yfinance_pre")):
+                    if v:
+                        price, src = v, s
                         break
 
             results.append({
                 "symbol": sym,
                 "price": price,
                 "source": src,
-                "market_state": market_state,
-                "regular_market_price": float(regular) if regular else None,
-                "pre_market_price": float(pre) if pre else None,
-                "post_market_price": float(post) if post else None,
+                "session": session,
+                "et_now": sess["et_now"],
+                "tz_label": sess["tz_label"],
+                "regular_market_price": _f(regular),
+                "pre_market_price":     _f(pre),
+                "post_market_price":    _f(post),
                 "change_24h_pct": info.get("regularMarketChangePercent"),
                 "currency": info.get("currency", "USD"),
-                "warning": "yfinance fallback (~15min delay) — symbol not on Bitget perp",
+                "warning": "yfinance fallback (~15min delay) — symbol not listed on Bitget perp",
             })
         except Exception as e:
             results.append({"symbol": sym, "error": str(e)})
